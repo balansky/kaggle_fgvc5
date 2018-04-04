@@ -24,8 +24,8 @@ def _train(model, sess_config):
     predictions = tf.argmax(res_softmax, 1)
     label_idx = tf.argmax(batch_labels, 1)
     correct_prediction = tf.equal(predictions, label_idx)
-    gender_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
-    tf.summary.scalar('accuracy', gender_accuracy)
+    res_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
+    tf.summary.scalar('accuracy', res_accuracy)
 
     cross_entropy = tf.losses.softmax_cross_entropy(batch_labels, logits, scope='cross_entropy')
     res_loss = tf.reduce_mean(cross_entropy, name='loss')
@@ -113,6 +113,14 @@ def main():
 if __name__== "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        'dataset_dir',
+        type=str,
+    )
+    parser.add_argument(
+        'ckpt_dir',
+        type=str,
+    )
+    parser.add_argument(
         '--options',
         type=str,
         default='train'
@@ -128,19 +136,9 @@ if __name__== "__main__":
         action='store_true'
     )
     parser.add_argument(
-        '--dataset_dir',
-        type=str,
-        default='/data/tfrecords/fashion_styles'
-    )
-    parser.add_argument(
         '--pretrained_ckpt',
         type=str,
         default=None
-    )
-    parser.add_argument(
-        '--ckpt_dir',
-        type=str,
-        default='/data/ckpts/fashion_styles'
     )
     parser.add_argument(
         '--summary_name',

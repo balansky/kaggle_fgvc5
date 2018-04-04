@@ -26,7 +26,7 @@ def input_tensors(image_dir, image_list, image_annotations):
     for i, image in enumerate(image_list):
         image_id = image['image_id']
         label_id = image_annotations[i]['label_id']
-        image_path = os.path.join(image_dir, str(image_id), str(label_id) + '.jpg')
+        image_path = os.path.join(image_dir, str(label_id), str(image_id) + '.jpg')
         if os.path.exists(image_path):
             tf_image_list.append(image_path)
             tf_label_list.append(label_id)
@@ -36,7 +36,7 @@ def input_tensors(image_dir, image_list, image_annotations):
 
 
 def image_classes(image_dir):
-    classes = [path for path in os.listdir(image_dir)
+    classes = [int(path) for path in os.listdir(image_dir)
                if os.path.isdir(os.path.join(image_dir, path))]
 
     classes = sorted(classes)
