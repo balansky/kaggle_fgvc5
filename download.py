@@ -5,6 +5,7 @@ from utils.data import load_dataset
 from PIL import Image
 import logging
 from multiprocessing import Pool
+import argparse
 import io
 
 logging.basicConfig(level=20)
@@ -76,5 +77,16 @@ def download_dataset(dataset_dir, force=False):
 
 
 if __name__=="__main__":
-    dataset_dir = "dataset"
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--dataset_dir',
+        type=str,
+        default=None
+    )
+    args, unparsed = parser.parse_known_args()
+    if args.dataset_dir:
+        dataset_dir = args.dataset_dir
+    else:
+        dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset")
+        make_folder(dataset_dir)
     download_dataset(dataset_dir)

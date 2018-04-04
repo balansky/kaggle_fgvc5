@@ -4,6 +4,7 @@ import json
 
 
 def load_dataset(dataset, dataset_dir):
+
     with open(os.path.join(dataset_dir, dataset + '.json'), 'r') as f:
         metas = json.load(f)
 
@@ -26,8 +27,9 @@ def input_tensors(image_dir, image_list, image_annotations):
         image_id = image['image_id']
         label_id = image_annotations[i]['label_id']
         image_path = os.path.join(image_dir, str(image_id), str(label_id) + '.jpg')
-        tf_image_list.append(image_path)
-        tf_label_list.append(label_id)
+        if os.path.exists(image_path):
+            tf_image_list.append(image_path)
+            tf_label_list.append(label_id)
     tf_images = tf.convert_to_tensor(tf_image_list, dtype=tf.string)
     tf_labels = tf.convert_to_tensor(tf_label_list, dtype=tf.int32)
     return tf_images, tf_labels
@@ -52,7 +54,7 @@ def batch_inputs(dataset, data_dir, batch_size, image_decoder, num_epochs=None, 
     for _ in range(num_threads):
         image_file = tf.read_file(input_queue[0])
         image = image_decoder.decode(image_file)
-        label = tf.one_hot(input_queue[1], len(labels))
+        label = tf.one_hot(input_queue[1], max(labels))
         enque_op.append([image, label])
 
     image_batch, label_batch = tf.train.batch_join(

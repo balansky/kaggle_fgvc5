@@ -18,7 +18,7 @@ def _train(model, sess_config):
     labels = image_classes(os.path.join(FLAGS.dataset_dir, 'train_val'))
     net = model(batch_images, keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
                 is_training=True)
-    logits = net.output_logits(len(labels), scope='output_logits')
+    logits = net.output_logits(max(labels), scope='output_logits')
 
     res_softmax = tf.nn.softmax(logits)
     predictions = tf.argmax(res_softmax, 1)
@@ -59,7 +59,7 @@ def _eval(model, sess_config):
     net = model(batch_images, keep_prob=1.0, base_trainable=False,
                 is_training=False)
 
-    logits = net.output_logits(len(labels), scope='output_logits')
+    logits = net.output_logits(max(labels), scope='output_logits')
     predictions = tf.argmax(tf.nn.softmax(logits), 1)
 
     labels = tf.argmax(batch_labels, 1)
