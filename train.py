@@ -11,7 +11,8 @@ tf.logging.set_verbosity(20)
 
 def _train(model, sess_config):
 
-    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip)
+    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip,
+                          distort_color=FLAGS.distort_color)
     batch_images, batch_labels = batch_inputs('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
                                               FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
                                               FLAGS.min_after_dequeue)
@@ -51,7 +52,7 @@ def _train(model, sess_config):
 
 def _eval(model, sess_config):
 
-    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip)
+    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method)
     batch_images, batch_labels = batch_inputs('val', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
                                               FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
                                               FLAGS.min_after_dequeue)
@@ -170,6 +171,12 @@ if __name__== "__main__":
     )
     parser.add_argument(
         '--random_flip',
+        default=False,
+        action='store_true'
+    )
+
+    parser.add_argument(
+        '--distort_color',
         default=False,
         action='store_true'
     )
