@@ -19,6 +19,7 @@ def _train(model, sess_config):
     labels = image_classes(os.path.join(FLAGS.dataset_dir, 'train_val'))
     net = model(batch_images, keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
                 is_training=True)
+    net.prelogits_names.append(["InceptionResnetV2/output_logits"])
     logits = net.output_logits(max(labels), scope='output_logits')
 
     res_softmax = tf.nn.softmax(logits)
