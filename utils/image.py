@@ -29,6 +29,15 @@ def standardization(decoded_fn):
         return image
     return standardization_decorator
 
+#bbox decorator
+def bbox(offset_height, offset_width, target_height, target_width):
+    def bbox_decorator(decoded_fn):
+        def _wraper(encoded_image):
+            image = decoded_fn(encoded_image)
+            image = tf.image.crop_to_bounding_box(image, offset_height, offset_width, target_height, target_width)
+            return image
+        return _wraper
+    return bbox_decorator
 
 #bicubic decorator
 def bicubic(target_size):
@@ -43,7 +52,31 @@ def bicubic(target_size):
         return _wraper
     return bicubic_decorator
 
-#random crop decorator
+
+def distort_bbox(target_bbox, min_object_covered=0.1, aspect_ratio_range=(0.75, 1.33),area_range=(0.05, 1.0),
+                max_attempts=100):
+    def distort_bbox_decorator(decoded_fn):
+        def _wraper(encoded_image):
+            decoded_image = decoded_fn(encoded_image)
+            crop_bbox = tf.expand_dims(target_bbox, axis=0)
+            crop_bbox = tf.expand_dims(crop_bbox, axis=0)
+            sample_distorted_bounding_box = tf.image.sample_distorted_bounding_box(
+                tf.shape(decoded_image),
+                bounding_boxes=crop_bbox,
+                min_object_covered=min_object_covered,
+                aspect_ratio_range=aspect_ratio_range,
+                area_range=area_range,
+                max_attempts=max_attempts,
+                use_image_if_no_bounding_boxes=True)
+            bbox_begin, bbox_size, distort_bbox = sample_distorted_bounding_box
+
+            # Crop the image to the specified bounding box.
+            cropped_image = tf.slice(decoded_image, bbox_begin, bbox_size)
+            cropped_image.set_shape([None, None, 3])
+            return cropped_image
+        return _wraper
+    return distort_bbox_decorator
+
 def random_crop(target_size):
     def crop_decorator(decoded_fn):
         def _wraper(encoded_image):
@@ -174,6 +207,16 @@ class Decoder(object):
         return decoded_image
 
 
+    def decode_and_bbox_crop(self, encoded_image, target_bbox, *args, **kwargs):
+        target_bbox = tf.cast(target_bbox, tf.int32)
+        @bicubic(self._output_size)
+        @bbox(target_bbox[0], target_bbox[1], target_bbox[2], target_bbox[3])
+        def _decode(encoded_image):
+            return self.decode_image(encoded_image)
+        decoded_image = _decode(encoded_image)
+        return decoded_image
+
+
     def decode_and_bicubic_resize(self, encoded_image, *args, **kwargs):
         @bicubic(self._output_size)
         def _decode(encoded_image):
@@ -181,24 +224,40 @@ class Decoder(object):
         decoded_image = _decode(encoded_image)
         return decoded_image
 
+    def decode_and_random_bbox_crop(self, encoded_image, norm_bbox, min_object_covered=0.1,
+                                    aspect_ratio_range=(0.75, 1.33),area_range=(0.05, 1.0), max_attempts=100,
+                                    *args, **kwargs):
+        @bicubic(self._output_size)
+        @distort_bbox(norm_bbox, min_object_covered, aspect_ratio_range, area_range, max_attempts)
+        def _decode(encoded_image):
+            return self.decode_image(encoded_image)
+        return _decode(encoded_image)
+
 
     def decode(self, encoded_image, *args, **kwargs):
         resized_image = self.resize(encoded_image, *args, **kwargs)
         if self._distort_color:
-            resized_image = self.apply_with_random_selector(
-                resized_image,
+            normalized_image = self.default_norm(resized_image)
+            normalized_image = self.apply_with_random_selector(
+                normalized_image,
                 lambda x, ordering: self.distort_color(x, ordering, False),
                 num_cases=4)
+            normalized_image = tf.subtract(normalized_image, 0.5)
+            normalized_image = tf.multiply(normalized_image, 2.0)
+        else:
+            normalized_image = self.normalize(resized_image)
         if self._random_flip:
-            resized_image = tf.image.random_flip_left_right(resized_image)
-        return self.normalize(resized_image)
+            normalized_image = tf.image.random_flip_left_right(normalized_image)
+        return normalized_image
 
 
     def resize_fn(self, fn_name):
         resize_methods = {
             'thumbnail': self.decode_and_thumbnail,
             'random_crop': self.decode_and_random_crop,
+            'bbox_crop': self.decode_and_bbox_crop,
             'bicubic': self.decode_and_bicubic_resize,
+            'bbox_random_crop': self.decode_and_random_bbox_crop,
             'default': self.decode_and_bicubic_resize
         }
         return resize_methods[fn_name]
