@@ -3,7 +3,7 @@ import argparse
 import tensorflow as tf
 from tensorflow.contrib import slim
 from cores.models import InceptResV2, InceptV4
-from utils import Decoder, train_op, image_classes, batch_inputs
+from utils import Decoder, train_op, image_classes, batch_inputs, softmax_accuracy_op, lr_decay_op
 
 FLAGS = None
 tf.logging.set_verbosity(20)
@@ -22,12 +22,7 @@ def _train(model, sess_config):
     net.prelogits_names.append(["InceptionResnetV2/output_logits"])
     logits = net.output_logits(max(labels), scope='output_logits')
 
-    res_softmax = tf.nn.softmax(logits)
-    predictions = tf.argmax(res_softmax, 1)
-    label_idx = tf.argmax(batch_labels, 1)
-    correct_prediction = tf.equal(predictions, label_idx)
-    res_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
-    tf.summary.scalar('accuracy', res_accuracy)
+    softmax_accuracy_op(logits, batch_labels)
 
     cross_entropy = tf.losses.softmax_cross_entropy(batch_labels, logits, scope='cross_entropy')
     res_loss = tf.reduce_mean(cross_entropy, name='loss')
@@ -49,6 +44,72 @@ def _train(model, sess_config):
                         log_every_n_steps=10,
                         global_step=global_step, number_of_steps=FLAGS.num_steps, summary_op=summary_op,
                         summary_writer=summary_writer, saver=saver, save_interval_secs=60, save_summaries_secs=60)
+
+
+def _train_multi_gpus(model, sess_config):
+    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip,
+                          distort_color=FLAGS.distort_color)
+    images, labels = batch_inputs('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
+                                  FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
+                                  FLAGS.min_after_dequeue)
+    batch_queue = tf.contrib.slim.prefetch_queue.prefetch_queue(
+        [images, labels], capacity=2 * FLAGS.num_gpus)
+    labels = image_classes(os.path.join(FLAGS.dataset_dir, 'train_val'))
+
+    with tf.device("/device:CPU:0"):
+        global_step = tf.train.get_or_create_global_step()
+        lr = lr_decay_op(FLAGS.decay_frequency, FLAGS.decay_rate)(FLAGS.learning_rate, global_step)
+        optimizer = tf.train.GradientDescentOptimizer(lr)
+
+    clone_grads = []
+    total_losses = []
+
+    with slim.arg_scope([slim.model_variable, slim.variable],
+                        device='/device:CPU:0'):
+        for i in range(0, FLAGS.num_gpus):
+            with tf.name_scope("clone_%d" % i):
+                with tf.device('/device:GPU:%d' % i):
+                    with tf.variable_scope(tf.get_variable_scope()):
+                        batch_images, batch_labels = batch_queue.dequeue()
+                        net = model(batch_images, keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
+                                    is_training=True, reuse=True if i > 0 else None)
+                        logits = net.output_logits(max(labels))
+                        cross_entropy = tf.losses.softmax_cross_entropy(batch_labels, logits, scope='cross_entropy')
+                        clone_loss = tf.reduce_mean(cross_entropy, name='clone_%d_loss' % i)
+                        scale_clone_loss = tf.div(clone_loss, 1.0*FLAGS.num_gpus, name='scaled_clone_%d_loss' % i)
+                        regularization_loss = tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                                                         "clone_%d"), 'clone_%d_reg_loss' % i)
+                        scale_reg_loss = tf.div(regularization_loss, 1.0*FLAGS.num_gpus)
+                        total_loss = tf.add(scale_clone_loss, scale_reg_loss, 'clone_%s_total_loss' % i)
+                        clone_grad = optimizer.compute_gradients(total_loss, tf.trainable_variables('clone_%d' % i))
+                        total_losses.append(total_loss)
+                        clone_grads.append(clone_grad)
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope='clone_0')
+
+    sum_grads = []
+    for grad_and_vars in zip(*clone_grads):
+        # Note that each grad_and_vars looks like the following:
+        #   ((grad_var0_clone0, var0), ... (grad_varN_cloneN, varN))
+        grads = []
+        var = grad_and_vars[0][1]
+        for g, v in grad_and_vars:
+            assert v == var
+            if g is not None:
+                grads.append(g)
+        if grads:
+            if len(grads) > 1:
+                sum_grad = tf.add_n(grads, name=var.op.name + '/sum_grads')
+            else:
+                sum_grad = grads[0]
+            sum_grads.append((sum_grad, var))
+
+    tf.summary.scalar('total_loss', tf.add_n(total_losses))
+
+
+
+
+
 
 
 def _eval(model, sess_config):

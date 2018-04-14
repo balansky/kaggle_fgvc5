@@ -11,6 +11,14 @@ def lr_decay_op(decay_frequency=None, decay_rate=None):
             return None
     return _lr_decay_fn
 
+def softmax_accuracy_op(logits, labels, name='accuracy'):
+    res_softmax = tf.nn.softmax(logits)
+    predictions = tf.argmax(res_softmax, 1)
+    label_idx = tf.argmax(labels, 1)
+    correct_prediction = tf.equal(predictions, label_idx)
+    res_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name=name)
+    tf.summary.scalar(name, res_accuracy)
+    return res_accuracy
 
 def train_op(total_loss, learning_rate, optimizer, decay_frequency=None, decay_rate=None, clip_gradients=None):
 

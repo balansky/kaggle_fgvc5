@@ -5,13 +5,14 @@ from cores import inception_v4, inception_resnet_v2
 
 class SlimNet(object):
 
-    def __init__(self, inputs, keep_prob=1.0, base_trainable=False, is_training=False):
+    def __init__(self, inputs, keep_prob=1.0, base_trainable=False, is_training=False, reuse=tf.AUTO_REUSE):
         self._scope_name = None
         self._prelogits_names = []
         self._inputs = inputs
         self._keep_prob = keep_prob
         self._cnn_trainable = base_trainable
         self._is_training = is_training
+        self._reuse = reuse
 
     @property
     def prelogits_names(self):
@@ -54,8 +55,9 @@ class SlimNet(object):
 class InceptV4(SlimNet):
 
     def __init__(self, inputs, keep_prob=1.0, base_trainable=False, is_training=False,
-                 use_batch_norm=True, weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
-        super(InceptV4, self).__init__(inputs, keep_prob, base_trainable, is_training)
+                 use_batch_norm=True, weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001,
+                 reuse=tf.AUTO_REUSE):
+        super(InceptV4, self).__init__(inputs, keep_prob, base_trainable, is_training, reuse)
         self._prelogits_names = ["InceptionV4/Logits", "InceptionV4/AuxLogits"]
         self._scope_name = 'InceptionV4'
         self._use_batch_norm = use_batch_norm
@@ -70,7 +72,7 @@ class InceptV4(SlimNet):
                                                                 weight_decay=self._weight_decay,
                                                                 batch_norm_decay=self._batch_norm_decay,
                                                                 batch_norm_epsilon=self._batch_norm_epsilon)):
-            with tf.variable_scope(self._scope_name, 'InceptionV4') as scope:
+            with tf.variable_scope(self._scope_name, 'InceptionV4', reuse=self._reuse) as scope:
                 with slim.arg_scope([slim.conv2d, slim.fully_connected, slim.batch_norm], trainable=self._cnn_trainable):
                     with slim.arg_scope([slim.batch_norm, slim.dropout], is_training=self._cnn_trainable):
                         net, end_points = inception_v4.inception_v4_base(self._inputs, scope=scope)
@@ -80,7 +82,7 @@ class InceptV4(SlimNet):
     def pre_logits(self):
         return slim.flatten(self.net, scope='logits')
 
-    def output_logits(self, num_labels, net=None, scope='Logits', reuse=tf.AUTO_REUSE):
+    def output_logits(self, num_labels, net=None, scope='Logits'):
 
         net = net if net is not None else self.net
 
@@ -88,7 +90,7 @@ class InceptV4(SlimNet):
                                                                 weight_decay=self._weight_decay,
                                                                 batch_norm_decay=self._batch_norm_decay,
                                                                 batch_norm_epsilon=self._batch_norm_epsilon)):
-            with tf.variable_scope(self._scope_name, 'InceptionV4', reuse=reuse):
+            with tf.variable_scope(self._scope_name, 'InceptionV4'):
                 with tf.variable_scope(scope):
                     logits = slim.dropout(net, keep_prob=self._keep_prob, is_training=self._is_training,
                                        scope='Dropout_1b')
@@ -101,22 +103,24 @@ class InceptV4(SlimNet):
 class InceptResV2(SlimNet):
 
     def __init__(self, inputs, keep_prob=1.0, base_trainable=False, is_training=False,
-                 weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
-        super(InceptResV2, self).__init__(inputs, keep_prob, base_trainable, is_training)
+                 weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001, reuse=tf.AUTO_REUSE):
+        super(InceptResV2, self).__init__(inputs, keep_prob, base_trainable, is_training, reuse)
         self._prelogits_names = ["InceptionResnetV2/AuxLogits", "InceptionResnetV2/Logits"]
         self._scope_name = 'InceptionResnetV2'
         self._batch_norm_decay = batch_norm_decay
         self._weight_decay = weight_decay
         self._batch_norm_epsilon = batch_norm_epsilon
+        self._arg_scope = inception_resnet_v2.inception_resnet_v2_arg_scope(
+                                        weight_decay=self._weight_decay,
+                                        batch_norm_decay=self._batch_norm_decay,
+                                        batch_norm_epsilon=self._batch_norm_epsilon
+        )
         self.net, self.end_points = self._build_net()
 
     def _build_net(self):
 
-        with slim.arg_scope(inception_resnet_v2.inception_resnet_v2_arg_scope(
-                weight_decay=self._weight_decay,
-                batch_norm_decay=self._batch_norm_decay,
-                batch_norm_epsilon=self._batch_norm_epsilon)):
-            with tf.variable_scope(self._scope_name, 'InceptionResnetV2') as scope:
+        with slim.arg_scope(self._arg_scope):
+            with tf.variable_scope(self._scope_name, 'InceptionResnetV2', reuse=self._reuse) as scope:
                 with slim.arg_scope([slim.conv2d, slim.fully_connected, slim.batch_norm], trainable=self._cnn_trainable):
                     with slim.arg_scope([slim.batch_norm, slim.dropout], is_training=self._cnn_trainable):
                         net, end_points = inception_resnet_v2.inception_resnet_v2_base(self._inputs, scope=scope)
@@ -126,16 +130,13 @@ class InceptResV2(SlimNet):
     def pre_logits(self):
         return slim.flatten(self.net, scope='logits')
 
-    def output_logits(self, num_labels, net=None, scope='Logits', reuse=tf.AUTO_REUSE):
+    def output_logits(self, num_labels, net=None, scope='Logits'):
 
         net = net if net is not None else self.net
 
-        with slim.arg_scope(inception_resnet_v2.inception_resnet_v2_arg_scope(
-                weight_decay=self._weight_decay,
-                batch_norm_decay=self._batch_norm_decay,
-                batch_norm_epsilon=self._batch_norm_epsilon)):
+        with slim.arg_scope(self._arg_scope):
 
-            with tf.variable_scope(self._scope_name, 'InceptionResnetV2', reuse=reuse):
+            with tf.variable_scope(self._scope_name, 'InceptionResnetV2'):
                 with tf.variable_scope(scope):
                     logits = slim.dropout(net, keep_prob=self._keep_prob, is_training=self._is_training,
                                        scope='Dropout_1b')
