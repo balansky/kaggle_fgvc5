@@ -21,6 +21,7 @@ def _train(model, sess_config):
     net = model(keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
                 is_training=True)
 
+
     total_loss, logits = net.net_loss(batch_images, batch_labels, label_num)
 
     softmax_accuracy_op(logits, batch_labels)
@@ -68,19 +69,15 @@ def _train_multi_gpus(model, sess_config):
             with tf.name_scope(clone_scope):
                 with tf.device('/device:GPU:%d' % i):
                     with tf.variable_scope(tf.get_variable_scope()):
-                        total_loss, logits = net.net_loss(batch_images, batch_labels, num_labels,
-                                                          reuse=True if i > 0 else None)
+                        net_loss, logits = net.net_loss(batch_images, batch_labels, num_labels,
+                                                        reuse=True if i > 0 else None, reg_scope=clone_scope)
+                        scale_loss = tf.div(net_loss, 1.0*FLAGS.num_gpus, name='scale_loss_%d' % i)
                         trainable_variable = tf.trainable_variables()
-                        clone_grad = optimizer.compute_gradients(total_loss, trainable_variable)
-                        total_losses.append(total_loss)
+                        clone_grad = optimizer.compute_gradients(scale_loss, trainable_variable)
+                        total_losses.append(scale_loss)
                         clone_grads.append(clone_grad)
 
-    total_loss = tf.div(tf.add_n(total_losses), 1.0*FLAGS.num_gpus, name='total_loss')
-    tf.summary.scalar('total_loss', total_loss)
-    for i, loss in enumerate(total_losses):
-        tf.summary.scalar('gpu_%d_loss' % i, loss)
-
-    train_step = mutli_gpu_train_op(optimizer, global_step, clone_grads, total_loss)
+    train_step = mutli_gpu_train_op(optimizer, global_step, clone_grads, total_losses)
 
     saver = tf.train.Saver(max_to_keep=5)
     summary_op = tf.summary.merge_all()

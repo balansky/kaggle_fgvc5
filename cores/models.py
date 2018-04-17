@@ -15,15 +15,12 @@ class FurnitureRes(InceptResV2):
         logits = self._logits(net, num_labels, "Logits")
         return logits
 
-    def net_loss(self, batch_inputs, batch_labels, num_labels, reuse=tf.AUTO_REUSE):
+    def net_loss(self, batch_inputs, batch_labels, num_labels, reuse=tf.AUTO_REUSE, reg_scope=None):
         logits = self.output_logits(batch_inputs, num_labels, reuse=reuse)
         cross_entropy = tf.losses.softmax_cross_entropy(batch_labels, logits, scope='cross_entropy')
         res_loss = tf.reduce_mean(cross_entropy, name='loss')
 
-        # tf.summary.scalar('loss', res_loss)
-        total_loss = tf.add_n([res_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
-
-        # tf.summary.scalar('net_loss', total_loss)
+        total_loss = tf.add_n([res_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope))
 
         return total_loss, logits
 
