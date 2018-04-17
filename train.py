@@ -21,7 +21,7 @@ def _train(model, sess_config):
     net = model(keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
                 is_training=True)
 
-    total_loss, logits = net.net_loss(batch_inputs, batch_labels, label_num)
+    total_loss, logits = net.net_loss(batch_images, batch_labels, label_num)
 
     softmax_accuracy_op(logits, batch_labels)
 
