@@ -115,6 +115,7 @@ class FurnitureResV2Trainer(FurnitureResTrainer):
                                                     num_threads, min_after_dequeue, shuffle, num_gpus,
                                                     keep_prob, base_trainable, is_training,
                                                     weight_decay, batch_norm_decay, batch_norm_epsilon)
+        self.prelogits_names.append("InceptionResnetV2/Parent_Logits")
 
     def load_parent_labels(self, data_dir):
         parent_labels = {}
