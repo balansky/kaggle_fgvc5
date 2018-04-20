@@ -17,7 +17,6 @@ def softmax_accuracy_op(logits, labels, name='accuracy'):
     label_idx = tf.argmax(labels, 1)
     correct_prediction = tf.equal(predictions, label_idx)
     res_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name=name)
-    tf.summary.scalar(name, res_accuracy)
     return res_accuracy
 
 

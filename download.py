@@ -1,7 +1,7 @@
 import requests
 from kaggle import api
 import os
-from utils.data import load_dataset
+from cores.utils.data import load_dataset
 from PIL import Image
 import logging
 from multiprocessing import Queue
@@ -12,8 +12,8 @@ import io
 logging.basicConfig(level=20)
 
 COMPETITION = "imaterialist-challenge-furniture-2018"
-DATASETS = ["train", "test", "validation"]
-
+# DATASETS = ["train", "test", "validation"]
+DATASETS = ["test"]
 
 def make_folder(folder_path):
     if not os.path.exists(folder_path):
@@ -44,25 +44,26 @@ def fillup_request_queue(image_dir, image_list, image_annotations=None):
 def download_images(q, force=False):
 
     successes = 0
-
-    while not q.empty():
-        image_id, image_url, save_dir = q.get()
-        try:
-            logging.info("Downloading Image From: %s" % image_url)
-            img_path = os.path.join(save_dir, str(image_id) + '.jpg')
-            if not os.path.exists(img_path) or force:
-                req = requests.get(image_url, timeout=10)
-                req.raise_for_status()
-                img = Image.open(io.BytesIO(req.content))
-                if not img.format == 'JPEG':
-                    img = img.convert('RGB')
-                img.save(img_path)
-            else:
-                logging.info("Image %s Exists, Skip Download !" % img_path)
-            successes += 1
-        except Exception as err:
-            logging.error(str(image_id) + ": " + str(err))
-
+    try:
+        while not q.empty():
+            image_id, image_url, save_dir = q.get(timeout=1)
+            try:
+                logging.info("Downloading Image From: %s" % image_url)
+                img_path = os.path.join(save_dir, str(image_id) + '.jpg')
+                if not os.path.exists(img_path) or force:
+                    req = requests.get(image_url, timeout=10)
+                    req.raise_for_status()
+                    img = Image.open(io.BytesIO(req.content))
+                    if not img.format == 'JPEG':
+                        img = img.convert('RGB')
+                    img.save(img_path)
+                else:
+                    logging.info("Image %s Exists, Skip Download !" % img_path)
+                successes += 1
+            except Exception as err:
+                logging.error(str(image_id) + ": " + str(err))
+    except Exception:
+        pass
     return successes
 
 

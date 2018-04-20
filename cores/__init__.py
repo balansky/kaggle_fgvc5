@@ -45,7 +45,10 @@ class SlimNet(object):
                 restore_variables = self.variables_without_prelogits()
             else:
                 restore_variables = tf.trainable_variables()
-            return slim.assign_from_checkpoint_fn(ckpt_path, restore_variables, ignore_missing_vars=False)
+            if ckpt_path:
+                return slim.assign_from_checkpoint_fn(ckpt_path, restore_variables, ignore_missing_vars=False)
+            else:
+                raise Exception("No Ckpts Found!")
         except Exception as err:
             tf.logging.warning(err)
             return None
