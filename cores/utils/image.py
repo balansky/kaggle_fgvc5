@@ -92,14 +92,16 @@ def random_crop(target_size):
 
 class Decoder(object):
 
-    def __init__(self, output_size, image_resize='default', image_norm='default', distort_color=False, random_flip=False):
+    def __init__(self, output_size, image_resize='default', image_norm='default', distort_color=False, random_flip=False, random_rotate=False):
         self._output_size = output_size
         self._image_norm = image_norm
         self._distort_color = distort_color
         self._random_flip = random_flip
+        self._random_rotate = random_rotate
         self.normalize = self.norm_fn(image_norm)
         self.resize = self.resize_fn(image_resize)
         self.resize_method = image_resize
+
 
     def minus_one_to_pos_one(self, image):
         image = self.default_norm(image)
@@ -198,8 +200,9 @@ class Decoder(object):
         return decoded_image
 
     def decode_and_random_crop(self, encoded_image, *args, **kwargs):
-        enlarged_size = self._output_size + int(self._output_size * 0.2)
+        enlarged_size = self._output_size + int(self._output_size * 0.3)
         @random_crop(self._output_size)
+        # @thumbnail(enlarged_size)
         @bicubic(enlarged_size)
         def _decode(encoded_image):
             return self.decode_image(encoded_image)
@@ -236,14 +239,20 @@ class Decoder(object):
 
     def decode(self, encoded_image, *args, **kwargs):
         resized_image = self.resize(encoded_image, *args, **kwargs)
+        if self._random_rotate:
+            random_degree = tf.random_normal([], 0, 0.25, dtype=tf.float32)
+            resized_image = tf.contrib.image.rotate(resized_image, random_degree)
         if self._distort_color:
             normalized_image = self.default_norm(resized_image)
             normalized_image = self.apply_with_random_selector(
                 normalized_image,
                 lambda x, ordering: self.distort_color(x, ordering, False),
                 num_cases=4)
-            normalized_image = tf.subtract(normalized_image, 0.5)
-            normalized_image = tf.multiply(normalized_image, 2.0)
+            if self._image_norm == 'minus_one_to_pos_one':
+                normalized_image = tf.subtract(normalized_image, 0.5)
+                normalized_image = tf.multiply(normalized_image, 2.0)
+            elif self._image_norm == 'standardize':
+                normalized_image = self.normalize(normalized_image)
         else:
             normalized_image = self.normalize(resized_image)
         if self._random_flip:

@@ -2,7 +2,7 @@ import os
 import argparse
 import tensorflow as tf
 from tensorflow.contrib import slim
-from cores.models import FurnitureResTrainer, FurnitureResV2Trainer
+from cores.models import *
 from cores.utils.image import Decoder
 from cores.utils.data import batch_inputs, image_classes
 from cores.utils.ops import train_op,  lr_decay_op, mutli_gpu_train_op
@@ -127,7 +127,9 @@ def _eval(model, sess_config):
 def main():
     models = {
         'InceptRes': FurnitureResTrainer,
-        'InceptResV2': FurnitureResV2Trainer,
+        'InceptResMixed': FurnitureResMixedTrainer,
+        'InceptResParent': FurnitureResParentTrainer,
+        'InceptResAtt': FurnitureAttentionTrainer
     }
     gpu_memory_fraction = FLAGS.gpu_memory_fraction
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)

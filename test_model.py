@@ -1,5 +1,6 @@
 from cores.utils.data import batch_inputs
 from cores.utils.image import Decoder
+from cores.models import FurnitureAttentionTrainer
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,5 +30,12 @@ def test_inputs():
         plt.imshow(np.clip(images[i], 0, 1))
     plt.show()
 
+def test_model():
+    img_decoder = Decoder(299, 'default', 'no_change')
 
-test_inputs()
+    with tf.Session() as sess:
+        model = FurnitureAttentionTrainer('train', 'dataset', 32, img_decoder)
+        logits = model.net_loss()
+
+# test_inputs()
+test_model()
