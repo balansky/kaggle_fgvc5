@@ -57,16 +57,19 @@ class SlimNet(object):
     def build_net(self, *args, **kwargs):
         raise NotImplementedError("No Build Net Has Been Implemented")
 
-    def _logits(self, net, num_labels, logit_scope='Logits', reuse=tf.AUTO_REUSE):
+    def _logits(self, net, num_labels, logit_scope='Logits', trainable=True, reuse=tf.AUTO_REUSE):
 
         with slim.arg_scope(self._arg_scope):
 
             with tf.variable_scope(self._scope_name, self._scope_name):
 
-                with tf.variable_scope(logit_scope, reuse=reuse):
+                with slim.arg_scope([slim.conv2d, slim.fully_connected, slim.batch_norm],
+                                    trainable=trainable):
 
-                    logits = slim.fully_connected(net, num_labels, activation_fn=None,
-                                                  normalizer_fn=None, scope='Logits')
+                    with tf.variable_scope(logit_scope, reuse=reuse):
+
+                        logits = slim.fully_connected(net, num_labels, activation_fn=None,
+                                                      normalizer_fn=None, scope='Logits')
         return logits
 
 

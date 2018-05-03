@@ -115,6 +115,7 @@ class Decoder(object):
         return image
 
     def standardize_image(self, image):
+        image = self.default_norm(image)
         image = tf.image.per_image_standardization(image)
         return image
 

@@ -3,8 +3,8 @@ import argparse
 import tensorflow as tf
 from tensorflow.contrib import slim
 from cores.models import *
+from cores.dataset import *
 from cores.utils.image import Decoder
-from cores.utils.data import batch_inputs, image_classes
 from cores.utils.ops import train_op,  lr_decay_op, mutli_gpu_train_op
 
 FLAGS = None
@@ -38,20 +38,12 @@ tf.logging.set_verbosity(20)
 #                         summary_writer=summary_writer, saver=saver, save_interval_secs=60, save_summaries_secs=60)
 
 
-def _train(model, sess_config):
-    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip,
-                          distort_color=FLAGS.distort_color)
+def _train(net, train_set, sess_config):
 
     with tf.device("/device:CPU:0"):
         global_step = tf.train.get_or_create_global_step()
         lr = lr_decay_op(FLAGS.decay_frequency, FLAGS.decay_rate)(FLAGS.learning_rate, global_step)
         optimizer = tf.train.GradientDescentOptimizer(lr)
-
-    net = model('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
-                FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
-                FLAGS.min_after_dequeue, num_gpus=FLAGS.num_gpus,
-                keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
-                is_training=True)
 
     clone_grads = []
     total_losses = []
@@ -60,10 +52,11 @@ def _train(model, sess_config):
         for i in range(0, FLAGS.num_gpus):
             clone_scope = "clone_%d" % i
             with tf.name_scope(clone_scope):
+                inputs = train_set.batch_inputs()
                 with tf.device('/device:GPU:%d' % i):
                     with tf.variable_scope(tf.get_variable_scope()):
 
-                        net_loss = net.net_loss(reuse=True if i > 0 else None, reg_scope=clone_scope)
+                        net_loss = net.net_loss(inputs, reuse=True if i > 0 else None, reg_scope=clone_scope)
 
                         scale_loss = tf.div(net_loss, 1.0*FLAGS.num_gpus, name='scale_loss_%d' % i)
                         trainable_variable = tf.trainable_variables()
@@ -85,15 +78,10 @@ def _train(model, sess_config):
                         summary_writer=summary_writer, saver=saver, save_interval_secs=60, save_summaries_secs=60)
 
 
-def _eval(model, sess_config):
+def _eval(net, data_set, sess_config):
 
-    img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method)
-
-    net = model('validation', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
-                FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
-                FLAGS.min_after_dequeue, num_gpus=1)
-
-    names_to_values, names_to_updates = net.net_eval()
+    inputs = data_set.batch_inputs()
+    names_to_values, names_to_updates = net.net_eval(inputs)
 
     for name, value in names_to_values.items():
         summary_name = 'eval/%s' % name
@@ -126,20 +114,31 @@ def _eval(model, sess_config):
 
 def main():
     models = {
-        'InceptRes': FurnitureResTrainer,
-        'InceptResMixed': FurnitureResMixedTrainer,
-        'InceptResParent': FurnitureResParentTrainer,
-        'InceptResAtt': FurnitureAttentionTrainer
+        'InceptRes': (FurnitureInceptRes, DataSet),
+        'InceptResMixed': (FurnitureInceptResMixed, DataSetWithParent),
+        'InceptResParent': (FurnitureInceptResParent, DataSetWithParent),
     }
     gpu_memory_fraction = FLAGS.gpu_memory_fraction
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)
     sess_config = tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False)
+    model, dataset = models[FLAGS.model]
     if FLAGS.options == 'train':
-        _train(models[FLAGS.model], sess_config)
-    # elif FLAGS.options == 'train_multi_gpus':
-    #     _train_multi_gpus(models[FLAGS.model], sess_config)
+        img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip,
+                              distort_color=FLAGS.distort_color)
+        train_set = dataset('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
+                            FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
+                            FLAGS.min_after_dequeue, num_gpus=FLAGS.num_gpus,)
+        net = model(FLAGS.dataset_dir, keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
+                    is_training=True)
+
+        _train(net, train_set, sess_config)
     else:
-        _eval(models[FLAGS.model], sess_config)
+        img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method)
+        val_set = dataset('validation', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
+                          FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
+                          FLAGS.min_after_dequeue, num_gpus=FLAGS.num_gpus,)
+        net = model(FLAGS.dataset_dir)
+        _eval(net, val_set, sess_config)
 
 
 if __name__== "__main__":

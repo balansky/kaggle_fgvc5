@@ -1,9 +1,8 @@
 import os
 import csv
 import argparse
-import tensorflow as tf
 from datetime import datetime
-from cores.models import FurnitureRes
+from cores.models import *
 from cores.utils.data import load_dataset, image_classes
 from cores.utils.image import Decoder
 
@@ -11,14 +10,16 @@ from cores.utils.image import Decoder
 FLAGS = None
 tf.logging.set_verbosity(20)
 
-def load_net(dataset_dir, model_path):
-    labels = image_classes(os.path.join(dataset_dir, 'train_val'))
+def load_net(model, net, model_path):
     sess = tf.Session()
-    net = FurnitureRes()
     input_placehold = tf.placeholder(tf.string, [None])
-    img_decoder = Decoder(299, 'default', 'minus_one_to_pos_one')
+    # img_decoder = Decoder(299, 'default', 'minus_one_to_pos_one')
+    img_decoder = Decoder(299, 'default', 'standardize')
     image_inputs = tf.map_fn(img_decoder.decode, input_placehold, dtype=tf.float32)
-    logits = net.output_logits(image_inputs, max(labels))
+    if model == 'InceptRes':
+        logits = net.output_logits(image_inputs)
+    else:
+        _, logits = net.output_logits(image_inputs)
     predictions = tf.argmax(tf.nn.softmax(logits), 1)
     loader = tf.train.Saver()
     loader.restore(sess, model_path)
@@ -34,8 +35,13 @@ def create_submission_csv(results, dataset_dir):
             csv_writer.writerow(res)
 
 def main():
+    models = {
+        'InceptRes': FurnitureInceptRes,
+        'InceptResMixed': FurnitureInceptResMixed
+    }
+    net = models[FLAGS.model](FLAGS.dataset_dir)
     image_dir, image_list, image_annotations = load_dataset('test', FLAGS.dataset_dir)
-    infer_fn = load_net(FLAGS.dataset_dir, FLAGS.model_path)
+    infer_fn = load_net(FLAGS.model, net, FLAGS.model_path)
     total_images = len(image_list)
     res = []
     for i in range(0, total_images, 20):
@@ -70,6 +76,11 @@ if __name__ == "__main__":
     parser.add_argument(
         'model_path',
         type=str,
+    )
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='InceptRes'
     )
     FLAGS, unparsed = parser.parse_known_args()
     main()
