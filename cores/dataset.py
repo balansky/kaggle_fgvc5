@@ -1,4 +1,4 @@
-from cores.utils.data import load_dataset, image_classes, load_parent_labels
+from cores.utils.data import load_dataset, load_child_labels, load_parent_labels
 import os
 import tensorflow as tf
 
@@ -17,7 +17,9 @@ class DataSet(object):
         self._num_threads = num_threads
         self._min_after_dequeue = min_after_dequeue
         self._shuffle = shuffle
-        self._labels = image_classes(os.path.join(self._data_dir, 'train_val'))
+        # self._labels = image_classes(os.path.join(self._data_dir, 'train_val'))
+        self._orig_to_labels, self._label_to_orig = load_child_labels(self._data_dir)
+        self._labels = [k for k in self._label_to_orig.keys()]
         self._queue = self._batch_queue()
 
     def _input_tensors(self):
@@ -26,11 +28,15 @@ class DataSet(object):
         tf_label_list = []
         for i, image in enumerate(image_list):
             image_id = image['image_id']
-            label_id = image_annotations[i]['label_id']
+            label_id = str(image_annotations[i]['label_id'])
+
+            if label_id not in self._orig_to_labels:
+                continue
+
             image_path = os.path.join(image_dir, str(label_id), str(image_id) + '.jpg')
             if os.path.exists(image_path):
                 tf_image_list.append(image_path)
-                tf_label_list.append(label_id)
+                tf_label_list.append(self._orig_to_labels[label_id])
         tf_images = tf.convert_to_tensor(tf_image_list, dtype=tf.string)
         tf_labels = tf.convert_to_tensor(tf_label_list, dtype=tf.int32)
         return tf_images, tf_labels
@@ -40,7 +46,7 @@ class DataSet(object):
         for _ in range(self._num_threads):
             image_file = tf.read_file(input_queue[0])
             image = self._image_decoder.decode(image_file)
-            label = tf.one_hot(input_queue[1], max(self._labels))
+            label = tf.one_hot(input_queue[1], len(self._labels))
             enque_list.append([image, label])
 
         return enque_list
@@ -79,11 +85,15 @@ class DataSetWithParent(DataSet):
         tf_parent_list = []
         for i, image in enumerate(image_list):
             image_id = image['image_id']
-            label_id = image_annotations[i]['label_id']
-            image_path = os.path.join(image_dir, str(label_id), str(image_id) + '.jpg')
+            label_id = str(image_annotations[i]['label_id'])
+
+            if label_id not in self._orig_to_labels:
+                continue
+
+            image_path = os.path.join(image_dir, label_id, str(image_id) + '.jpg')
             if os.path.exists(image_path):
                 tf_image_list.append(image_path)
-                tf_label_list.append(label_id)
+                tf_label_list.append(self._orig_to_labels[label_id])
                 tf_parent_list.append(self._child_to_parent[label_id])
         tf_images = tf.convert_to_tensor(tf_image_list, dtype=tf.string)
         tf_labels = tf.convert_to_tensor(tf_label_list, dtype=tf.int32)
@@ -95,7 +105,7 @@ class DataSetWithParent(DataSet):
         for _ in range(self._num_threads):
             image_file = tf.read_file(input_queue[0])
             image = self._image_decoder.decode(image_file)
-            label = tf.one_hot(input_queue[1], max(self._labels))
+            label = tf.one_hot(input_queue[1], len(self._labels))
             parent = tf.one_hot(input_queue[2], len(self._parent_labels))
             enque_list.append([image, label, parent])
         return enque_list

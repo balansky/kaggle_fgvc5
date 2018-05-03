@@ -1,11 +1,16 @@
-import os
 import argparse
-import tensorflow as tf
-from tensorflow.contrib import slim
 from cores.models import *
 from cores.dataset import *
 from cores.utils.image import Decoder
-from cores.utils.ops import train_op,  lr_decay_op, mutli_gpu_train_op
+from cores.utils.ops import lr_decay_op, mutli_gpu_train_op
+from generate_labels import generate_child_labels
+import os
+# from cores.utils.plt import plot_confusion_matrix
+# import numpy as np
+import matplotlib.pyplot as plt
+# from mlxtend.plotting import plot_confusion_matrix
+# import pylab as pl
+from pandas_ml import ConfusionMatrix
 
 FLAGS = None
 tf.logging.set_verbosity(20)
@@ -39,6 +44,9 @@ tf.logging.set_verbosity(20)
 
 
 def _train(net, train_set, sess_config):
+
+    if not os.path.exists(os.path.join(FLAGS.dataset_dir, 'child_labels.json')):
+        generate_child_labels(FLAGS.dataset_dir, [], [])
 
     with tf.device("/device:CPU:0"):
         global_step = tf.train.get_or_create_global_step()
@@ -112,11 +120,65 @@ def _eval(net, data_set, sess_config):
         )
 
 
+def _confusion_matrix(net, data_set, sess_config):
+    preds = []
+    lbs = []
+    count = 0
+    orig_to_child, child_to_orig = load_child_labels(FLAGS.dataset_dir)
+    with tf.Session(config=sess_config) as sess:
+        inputs = data_set.batch_inputs()
+        label_inputs = inputs[1]
+        output_logits = net.output_logits(inputs[0])
+        sess.run(tf.initialize_local_variables())
+        saver = tf.train.Saver()
+        saver.restore(sess, tf.train.latest_checkpoint(FLAGS.ckpt_dir))
+        if len(inputs) == 3:
+            output_logits = output_logits[-1]
+        output_softmax = tf.nn.softmax(output_logits)
+        prediction = tf.argmax(output_softmax, axis=1)
+        labels = tf.argmax(label_inputs, axis=1)
+
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+        while True:
+            try:
+                count += 1
+                print("%s Evalutions..." % (count * FLAGS.batch_size))
+                pred_values, label_values = sess.run([prediction, labels])
+                preds.extend([child_to_orig[pd] for pd in pred_values.tolist()])
+                lbs.extend([child_to_orig[lv] for lv in label_values.tolist()])
+            except Exception:
+                coord.request_stop()
+                coord.join(threads)
+                break
+
+    cm = ConfusionMatrix(lbs, preds)
+    cm.print_stats()
+    cm.plot()
+    plt.show()
+    # np.set_printoptions(precision=2)
+    # plt.figure()
+    # fig, ax = plot_confusion_matrix(confuse_value, figsize=(100, 100))
+
+    # plt.show()
+
+
+
+
+
+
+
 def main():
     models = {
         'InceptRes': (FurnitureInceptRes, DataSet),
         'InceptResMixed': (FurnitureInceptResMixed, DataSetWithParent),
         'InceptResParent': (FurnitureInceptResParent, DataSetWithParent),
+    }
+    options = {
+        'train': _train,
+        'val': _eval,
+        'val_loop': _eval,
+        'confuse_matrix': _confusion_matrix
     }
     gpu_memory_fraction = FLAGS.gpu_memory_fraction
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)
@@ -125,20 +187,18 @@ def main():
     if FLAGS.options == 'train':
         img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method, random_flip=FLAGS.random_flip,
                               distort_color=FLAGS.distort_color)
-        train_set = dataset('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
+        data_set = dataset('train', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
                             FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
                             FLAGS.min_after_dequeue, num_gpus=FLAGS.num_gpus,)
         net = model(FLAGS.dataset_dir, keep_prob=FLAGS.keep_prob, base_trainable=FLAGS.base_trainable,
                     is_training=True)
-
-        _train(net, train_set, sess_config)
     else:
         img_decoder = Decoder(FLAGS.input_size, FLAGS.resize_method, FLAGS.norm_method)
-        val_set = dataset('validation', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
+        data_set = dataset('validation', FLAGS.dataset_dir, FLAGS.batch_size, img_decoder,
                           FLAGS.num_epochs, FLAGS.capacity, FLAGS.num_threads,
                           FLAGS.min_after_dequeue, num_gpus=FLAGS.num_gpus,)
         net = model(FLAGS.dataset_dir)
-        _eval(net, val_set, sess_config)
+    options[FLAGS.options](net, data_set, sess_config)
 
 
 if __name__== "__main__":

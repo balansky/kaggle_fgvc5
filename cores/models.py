@@ -1,5 +1,5 @@
 from cores import InceptResV2, tf
-from cores.utils.data import image_classes, load_parent_labels
+from cores.utils.data import load_child_labels, load_parent_labels
 from cores.utils.ops import softmax_accuracy_op
 from tensorflow.contrib import slim
 from cores.nets.inception_resnet_v2 import block8, block17, block35
@@ -13,14 +13,15 @@ class FurnitureInceptRes(InceptResV2):
                  weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
         super(FurnitureInceptRes, self).__init__(keep_prob, base_trainable, is_training, weight_decay,
                                                   batch_norm_decay, batch_norm_epsilon)
-        self.labels = image_classes(os.path.join(data_dir, 'train_val'))
+        self._orig_to_child, self._child_to_orig = load_child_labels(data_dir)
+        self.labels = [k for k in self._child_to_orig.keys()]
         self.prelogits_names.append("InceptionResnetV2/output_logits")
         self._logit_scope = "output_logits"
 
 
     def output_logits(self, inputs, reuse=tf.AUTO_REUSE):
         net, end_points = self.build_net(inputs, reuse)
-        logits = self._logits(net, max(self.labels), "Logits")
+        logits = self._logits(net, len(self.labels), "Logits")
         return logits
 
     def net_loss(self, batch_inputs, reuse=tf.AUTO_REUSE, reg_scope=None):
@@ -28,17 +29,22 @@ class FurnitureInceptRes(InceptResV2):
         logits = self.output_logits(batch_images, reuse=reuse)
         cross_entropy = tf.losses.softmax_cross_entropy(batch_labels, logits, scope='cross_entropy')
         res_loss = tf.reduce_mean(cross_entropy, name='loss')
-
-        total_loss = tf.add_n([res_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope))
+        if not self._cnn_trainable:
+            regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                     scope=reg_scope + "/InceptionResnetV2/output_logits")
+        else:
+            regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope)
+        total_loss = tf.add_n([res_loss] + regs)
         res_accuracy = softmax_accuracy_op(logits, batch_labels)
         with tf.device('/device:CPU:0'):
-            tf.summary.scalar("loss", res_loss)
+            tf.summary.scalar("loss", total_loss)
+            tf.summary.scalar("softmax_loss", res_loss)
             tf.summary.scalar('accuracy', res_accuracy)
         return total_loss
 
     def net_eval(self, batch_inputs):
         batch_images, batch_labels = batch_inputs
-        logits = self.output_logits(batch_images, max(self.labels))
+        logits = self.output_logits(batch_images)
         predictions = tf.argmax(tf.nn.softmax(logits), 1)
 
         labels = tf.argmax(batch_labels, 1)
@@ -51,8 +57,7 @@ class FurnitureInceptRes(InceptResV2):
 
 class FurnitureInceptResParent(FurnitureInceptRes):
 
-    def __init__(self, data_dir,
-                 keep_prob=1.0, base_trainable=False, is_training=False,
+    def __init__(self, data_dir, keep_prob=1.0, base_trainable=False, is_training=False,
                  weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
         self.parent_labels, self.child_to_parent = load_parent_labels(data_dir)
         super(FurnitureInceptResParent, self).__init__(data_dir,
@@ -73,10 +78,17 @@ class FurnitureInceptResParent(FurnitureInceptRes):
         parent_cross_entropy = tf.losses.softmax_cross_entropy(batch_parents, parent_logits, scope='parent_cross_entropy')
         parent_loss = tf.reduce_mean(parent_cross_entropy, name='parent_loss')
 
-        total_loss = tf.add_n([parent_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope))
+        if not self._cnn_trainable:
+            regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                     scope=reg_scope + "/InceptionResnetV2/Parent_Logits")
+        else:
+            regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope)
+
+        total_loss = tf.add_n([parent_loss] + regs)
         parent_accuracy = softmax_accuracy_op(parent_logits, batch_parents)
         with tf.device('/device:CPU:0'):
             tf.summary.scalar('parent_loss', parent_loss)
+            tf.summary.scalar('total_loss', total_loss)
             tf.summary.scalar('parent_accuracy', parent_accuracy)
         return total_loss
 
@@ -95,8 +107,7 @@ class FurnitureInceptResParent(FurnitureInceptRes):
 
 class FurnitureInceptResMixed(FurnitureInceptResParent):
 
-    def __init__(self, data_dir,
-                 keep_prob=1.0, base_trainable=False, is_training=False,
+    def __init__(self, data_dir, keep_prob=1.0, base_trainable=False, is_training=False,
                  weight_decay=0.00004, batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
         super(FurnitureInceptResMixed, self).__init__(data_dir,
                                                        keep_prob, base_trainable, is_training,
@@ -106,7 +117,7 @@ class FurnitureInceptResMixed(FurnitureInceptResParent):
     def output_logits(self, inputs, reuse=tf.AUTO_REUSE):
         net, end_points = self.build_net(inputs, reuse)
         parent_logits = self._logits(net, len(self.parent_labels), "Parent_Logits")
-        logits = self._logits(net, max(self.labels), "Child_Logits")
+        logits = self._logits(net, len(self.labels), "Child_Logits")
         return parent_logits, logits
 
     def net_loss(self, batch_inputs, reuse=tf.AUTO_REUSE, reg_scope=None):
@@ -119,12 +130,21 @@ class FurnitureInceptResMixed(FurnitureInceptResParent):
         parent_cross_entropy = tf.losses.softmax_cross_entropy(batch_parents, parent_logits, scope='parent_cross_entropy')
         parent_loss = tf.reduce_mean(parent_cross_entropy, name='parent_loss')
 
-        total_loss = tf.add_n([parent_loss, child_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope))
+        if not self._cnn_trainable:
+            child_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                           scope=reg_scope + "/InceptionResnetV2/Child_Logits")
+            parent_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                            scope=reg_scope + "/InceptionResnetV2/Parent_Logits")
+            regs = child_regs + parent_regs
+        else:
+            regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope=reg_scope)
+        total_loss = tf.add_n([parent_loss, child_loss] + regs)
         child_accuracy = softmax_accuracy_op(logits, batch_labels)
         parent_accuracy = softmax_accuracy_op(parent_logits, batch_parents)
         with tf.device('/device:CPU:0'):
             tf.summary.scalar('child_loss', child_loss)
             tf.summary.scalar('parent_loss', parent_loss)
+            tf.summary.scalar('total_loss', total_loss)
             tf.summary.scalar('child_accuracy', child_accuracy)
             tf.summary.scalar('parent_accuracy', parent_accuracy)
         return total_loss

@@ -1,5 +1,4 @@
 import os
-# import tensorflow as tf
 import json
 
 
@@ -20,7 +19,7 @@ def load_dataset(dataset, dataset_dir):
     return image_dir, image_list, image_annotations
 
 
-def load_parent_labels( data_dir):
+def load_parent_labels(data_dir):
     parent_labels = {}
     child_to_parent = {}
     with open(os.path.join(data_dir, 'parent_labels.json'), 'r') as f:
@@ -30,6 +29,16 @@ def load_parent_labels( data_dir):
         for child in parent_values['subs']:
             child_to_parent[child] = parent_values['id']
     return parent_labels, child_to_parent
+
+
+def load_child_labels(data_dir):
+    child_to_orig = {}
+    with open(os.path.join(data_dir, 'child_labels.json'), 'r') as f:
+       org_to_child = json.load(f)
+    for c_key, c_value in org_to_child.items():
+        if c_value not in child_to_orig:
+            child_to_orig[str(c_value)] = c_key
+    return org_to_child, child_to_orig
 
 
 def image_classes(image_dir):
